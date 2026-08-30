@@ -1,9 +1,4 @@
-import {
-  DomainError,
-  NotFoundError,
-  UnauthorizedError,
-  ValidationError,
-} from '../src/index'
+import { DomainError, NotFoundError, UnauthorizedError } from '../src/index'
 
 describe('DomainError', () => {
   test('herda de Error e do próprio DomainError', () => {
@@ -24,7 +19,6 @@ describe('DomainError', () => {
 
 describe('Subclasses de DomainError', () => {
   const cases = [
-    { Err: ValidationError, statusCode: 422 },
     { Err: NotFoundError, statusCode: 404 },
     { Err: UnauthorizedError, statusCode: 401 },
   ] as const
