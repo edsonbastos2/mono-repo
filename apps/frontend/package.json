@@ -12,6 +12,7 @@
     "@meu-projeto/auth": "*",
     "@meu-projeto/cadastro-empresas": "*",
     "@meu-projeto/produtos": "*",
+    "@meu-projeto/shared": "*",
     "next": "16.3.3",
     "react": "19.2.8",
     "react-dom": "19.2.8"

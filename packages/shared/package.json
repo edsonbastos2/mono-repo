@@ -1,8 +1,8 @@
 {
-  "name": "@meu-projeto/auth",
+  "name": "@meu-projeto/shared",
   "version": "0.0.1",
   "private": true,
-  "description": "Módulo de negócio auth",
+  "description": "Pacote de infraestrutura compartilhado",
   "license": "UNLICENSED",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -11,9 +11,6 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "jest",
     "test:watch": "jest --watch"
-  },
-  "dependencies": {
-    "@meu-projeto/shared": "*"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",

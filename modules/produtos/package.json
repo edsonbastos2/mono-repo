@@ -12,6 +12,9 @@
     "test": "jest",
     "test:watch": "jest --watch"
   },
+  "dependencies": {
+    "@meu-projeto/shared": "*"
+  },
   "devDependencies": {
     "@types/jest": "^29.5.14",
     "jest": "^29.7.0",

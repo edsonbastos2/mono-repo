@@ -26,6 +26,7 @@
     "@meu-projeto/auth": "*",
     "@meu-projeto/cadastro-empresas": "*",
     "@meu-projeto/produtos": "*",
+    "@meu-projeto/shared": "*",
     "@nestjs/common": "^12.0.1",
     "@nestjs/config": "^12.0.0",
     "@nestjs/core": "^12.0.1",
