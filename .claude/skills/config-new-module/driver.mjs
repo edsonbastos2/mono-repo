@@ -17,6 +17,9 @@
 //   --skip-install    não roda `npm install`
 //   --skip-build      não roda `npm run build`
 //   --skip-test       não roda os testes do módulo
+//   --skip-backend-module  não gera o módulo/controller NestJS em apps/backend
+//   --skip-frontend-module não gera a rota + página + componente em apps/frontend
+//   --route-group <g> route group do App Router para a rota privada. Padrão: (private)
 //   --dry-run         mostra o que faria, sem escrever nada
 
 import { execFileSync } from 'node:child_process'
@@ -27,6 +30,12 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SKILL_DIR = __dirname
 const ASSETS_DIR = path.join(SKILL_DIR, 'assets')
+// Templates do módulo NestJS gerado em apps/backend/src/modules/<nome>.
+// Ficam FORA de assets/ para não entrarem no copyTemplateTree do módulo de negócio.
+const NEST_ASSETS_DIR = path.join(SKILL_DIR, 'nest-assets')
+// Templates do módulo frontend gerado em apps/frontend/src (rota + página +
+// componente). Também FORA de assets/ pelo mesmo motivo do nest-assets/.
+const FRONT_ASSETS_DIR = path.join(SKILL_DIR, 'front-assets')
 // .agents/skills/config-new-module/driver.mjs -> raiz do repo
 const REPO_ROOT = path.resolve(SKILL_DIR, '..', '..', '..')
 
@@ -34,15 +43,18 @@ const IS_WIN = process.platform === 'win32'
 const NPM = IS_WIN ? 'npm.cmd' : 'npm'
 
 function parseArgs(argv) {
-  const args = { scope: '@meu-projeto' }
+  const args = { scope: '@meu-projeto', routeGroup: '(private)' }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--name') args.name = argv[++i]
     else if (a === '--scope') args.scope = argv[++i]
+    else if (a === '--route-group') args.routeGroup = argv[++i]
     else if (a === '--force') args.force = true
     else if (a === '--skip-install') args.skipInstall = true
     else if (a === '--skip-build') args.skipBuild = true
     else if (a === '--skip-test') args.skipTest = true
+    else if (a === '--skip-backend-module') args.skipBackendModule = true
+    else if (a === '--skip-frontend-module') args.skipFrontendModule = true
     else if (a === '--dry-run') args.dryRun = true
     else {
       console.error(`Argumento desconhecido: ${a}`)
@@ -126,10 +138,21 @@ function main() {
   }
   const scope = args.scope.startsWith('@') ? args.scope : `@${args.scope}`
   const packageName = `${scope}/${name}`
+  const className = toPascalCase(name)
+  // Normaliza o route group: aceita "private" ou "(private)".
+  const routeGroup = /^\(.*\)$/.test(args.routeGroup)
+    ? args.routeGroup
+    : `(${args.routeGroup})`
 
   log(`raiz do repo: ${REPO_ROOT}`)
   log(`módulo:       modules/${name}`)
   log(`pacote:       ${packageName}`)
+  if (!args.skipBackendModule) {
+    log(`nest module:  apps/backend/src/modules/${name} (${className}Module)`)
+  }
+  if (!args.skipFrontendModule) {
+    log(`front module: apps/frontend/src/app/${routeGroup}/${name} + src/modules/${name}`)
+  }
 
   // 1. modules/ e modules/<nome>
   const modulesDir = path.join(REPO_ROOT, 'modules')
@@ -188,6 +211,22 @@ function main() {
     log(`apps/${app}: adicionado "${packageName}": "*" em dependencies`)
   }
 
+  // 4b. NestJS: módulo + controller em apps/backend/src/modules/<nome>,
+  //     registrados no AppModule. Não toca em nada do módulo de negócio.
+  if (!args.skipBackendModule) {
+    scaffoldBackendModule(name, className, args)
+  } else {
+    log('scaffold do módulo NestJS pulado (--skip-backend-module)')
+  }
+
+  // 4c. Frontend: rota privada + página + componente em apps/frontend/src.
+  //     Independente do módulo de negócio e do módulo NestJS.
+  if (!args.skipFrontendModule) {
+    scaffoldFrontendModule(name, className, routeGroup, args)
+  } else {
+    log('scaffold do módulo frontend pulado (--skip-frontend-module)')
+  }
+
   if (args.dryRun) {
     log('dry-run concluído — nenhum comando executado.')
     return
@@ -208,6 +247,151 @@ function main() {
 
 function sortKeys(obj) {
   return Object.fromEntries(Object.entries(obj).sort(([a], [b]) => a.localeCompare(b)))
+}
+
+// kebab-case -> PascalCase (auth -> Auth, tax-report -> TaxReport)
+function toPascalCase(kebab) {
+  return kebab
+    .split('-')
+    .filter(Boolean)
+    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+    .join('')
+}
+
+// kebab-case -> Title Case ("cadastro-empresas" -> "Cadastro Empresas")
+function toTitleCase(kebab) {
+  return kebab
+    .split('-')
+    .filter(Boolean)
+    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+    .join(' ')
+}
+
+// Gera apps/backend/src/modules/<nome>/{<nome>.module.ts,<nome>.controller.ts}
+// a partir de nest-assets/ e registra o módulo no AppModule. Determinístico
+// e idempotente (não duplica import/registro se rodar de novo).
+function scaffoldBackendModule(name, className, args) {
+  const backendDir = path.join(REPO_ROOT, 'apps', 'backend')
+  if (!fs.existsSync(backendDir)) {
+    log('apps/backend não encontrado — scaffold do módulo NestJS pulado')
+    return
+  }
+
+  const moduleDir = path.join(backendDir, 'src', 'modules', name)
+  if (fs.existsSync(moduleDir) && !args.force) {
+    fail(`apps/backend/src/modules/${name} já existe. Use --force para sobrescrever.`)
+  }
+
+  const map = { __MODULE_NAME__: name, __MODULE_CLASS__: className }
+  const files = [
+    ['module.ts.tmpl', `${name}.module.ts`],
+    ['controller.ts.tmpl', `${name}.controller.ts`],
+  ]
+  for (const [tmpl, outName] of files) {
+    const src = path.join(NEST_ASSETS_DIR, tmpl)
+    const dest = path.join(moduleDir, outName)
+    const rendered = applyPlaceholders(fs.readFileSync(src, 'utf8'), map)
+    if (args.dryRun) {
+      log(`(dry-run) criaria ${path.relative(REPO_ROOT, dest)}`)
+    } else {
+      fs.mkdirSync(path.dirname(dest), { recursive: true })
+      fs.writeFileSync(dest, rendered)
+    }
+  }
+  log(`NestJS: ${name}.module.ts + ${name}.controller.ts (GET /${name}) em apps/backend/src/modules/${name}`)
+
+  registerModuleInAppModule(
+    path.join(backendDir, 'src', 'app.module.ts'),
+    name,
+    className,
+    args.dryRun,
+  )
+}
+
+// Insere o import e adiciona <Class>Module ao array `imports` do @Module do
+// AppModule. Se já estiver lá, não faz nada.
+function registerModuleInAppModule(appModulePath, name, className, dryRun) {
+  if (!fs.existsSync(appModulePath)) {
+    log('apps/backend/src/app.module.ts não encontrado — módulo NestJS não registrado')
+    return
+  }
+
+  let src = fs.readFileSync(appModulePath, 'utf8')
+  const moduleClass = `${className}Module`
+  if (new RegExp(`\\b${moduleClass}\\b`).test(src)) {
+    log(`AppModule: ${moduleClass} já registrado`)
+    return
+  }
+
+  // import com extensão .js (backend é ESM nodenext)
+  const importLine = `import { ${moduleClass} } from './modules/${name}/${name}.module.js';`
+  const lines = src.split('\n')
+  let lastImport = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (/^import\s/.test(lines[i])) lastImport = i
+  }
+  if (lastImport >= 0) lines.splice(lastImport + 1, 0, importLine)
+  else lines.unshift(importLine)
+  src = lines.join('\n')
+
+  if (/imports:\s*\[/.test(src)) {
+    src = src.replace(/imports:\s*\[/, (m) => `${m}\n\t\t${moduleClass},`)
+  } else {
+    // @Module sem array `imports` — cria um
+    src = src.replace(/@Module\(\{/, (m) => `${m}\n  imports: [${moduleClass}],`)
+  }
+
+  if (dryRun) {
+    log(`(dry-run) registraria ${moduleClass} em ${path.relative(REPO_ROOT, appModulePath)}`)
+    return
+  }
+  fs.writeFileSync(appModulePath, src)
+  log(`AppModule: ${moduleClass} importado e adicionado em imports`)
+}
+
+// Gera, em apps/frontend/src:
+//   app/<routeGroup>/<nome>/page.tsx            (rota do App Router)
+//   modules/<nome>/pages/<nome>.page.tsx        (página do módulo)
+//   modules/<nome>/components/<nome>.component.tsx (componente principal)
+// a partir de front-assets/. Não toca no módulo de negócio nem no NestJS.
+function scaffoldFrontendModule(name, className, routeGroup, args) {
+  const frontendDir = path.join(REPO_ROOT, 'apps', 'frontend')
+  if (!fs.existsSync(frontendDir)) {
+    log('apps/frontend não encontrado — scaffold do módulo frontend pulado')
+    return
+  }
+
+  const routeDir = path.join(frontendDir, 'src', 'app', routeGroup, name)
+  const moduleDir = path.join(frontendDir, 'src', 'modules', name)
+  for (const dir of [routeDir, moduleDir]) {
+    if (fs.existsSync(dir) && !args.force) {
+      fail(`${path.relative(REPO_ROOT, dir)} já existe. Use --force para sobrescrever.`)
+    }
+  }
+
+  const map = {
+    __MODULE_NAME__: name,
+    __MODULE_CLASS__: className,
+    __MODULE_TITLE__: toTitleCase(name),
+  }
+  const files = [
+    ['route.page.tsx.tmpl', path.join(routeDir, 'page.tsx')],
+    ['page.tsx.tmpl', path.join(moduleDir, 'pages', `${name}.page.tsx`)],
+    ['component.tsx.tmpl', path.join(moduleDir, 'components', `${name}.component.tsx`)],
+  ]
+  for (const [tmpl, dest] of files) {
+    const src = path.join(FRONT_ASSETS_DIR, tmpl)
+    const rendered = applyPlaceholders(fs.readFileSync(src, 'utf8'), map)
+    if (args.dryRun) {
+      log(`(dry-run) criaria ${path.relative(REPO_ROOT, dest)}`)
+    } else {
+      fs.mkdirSync(path.dirname(dest), { recursive: true })
+      fs.writeFileSync(dest, rendered)
+    }
+  }
+  log(
+    `frontend: app/${routeGroup}/${name}/page.tsx + modules/${name}/pages/${name}.page.tsx + modules/${name}/components/${name}.component.tsx`,
+  )
 }
 
 main()

@@ -1,0 +1,9 @@
+import { Controller, Get } from '@nestjs/common';
+
+@Controller('__MODULE_NAME__')
+export class __MODULE_CLASS__Controller {
+  @Get()
+  getRoot(): { message: string } {
+    return { message: 'Módulo __MODULE_NAME__ disponível.' };
+  }
+}
