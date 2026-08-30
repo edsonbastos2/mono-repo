@@ -6,4 +6,5 @@
  * contratos comuns que não pertencem a nenhum domínio de negócio específico.
  */
 export * from "./error";
+export * from "./model";
 export * from "./validation";
